@@ -1,0 +1,119 @@
+---
+title: "Google Scholar Data of Ali Altıntaş"
+author: "Ali Altıntaş"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::readthedown:
+    toc_depth: 3
+    code_folding: show
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Getting started
+
+## Required `R` libraries
+
+```{r libraries, message=FALSE}
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load("rmdformats")
+pacman::p_load("data.table", "magrittr", "ggplot2", "scholar", "openxlsx")
+
+```
+
+## Google Scholar ID
+
+It is essential to find your Google Scholar ID for this script to function. Simply, go to your page on [Google Scholar](https://scholar.google.com/) and click on **My Profile**. It will take you to your own Google Scholar page. For example, here is [my Google Scholar page](https://scholar.google.com/citations?user=rCdU5Z0AAAAJ&hl=en). 
+
+The web address already shows the user ID:  *https&#58;//scholar.google.com/citations?user=***rCdU5Z0AAAAJ***&hl=en*
+
+Therefore, let's assign user ID into an object:
+
+```{r scholar_id}
+## Define the id for Ali Altintas
+id <- "rCdU5Z0AAAAJ"
+```
+
+# Data analysis
+
+## Extracting data
+
+```{r extract_info, results='hide'}
+## Get profile
+l <- get_profile(id)
+
+## Print the name and affliation etc
+l[1:7]
+```
+```{r extract_pubs, results='hide'}
+## Get publication
+p <- get_publications(id)
+
+## Clean up the data
+p_clean <- as.data.table(p)
+p_clean <- p_clean[!(journal %in% "bioRxiv") & !(cid %in% "10083967249640088680")]
+head(p_clean, 3)
+
+```
+
+
+```{r extract_citation, warning=FALSE}
+## Get citation history, i.e. citations to his work in a given year
+ct <- get_citation_history(id)
+
+## Create annotations
+text2plot <- data.table(`h-index = ` = l$h_index,
+                        `i10-index = ` = l$i10_index,
+                        `Articles = ` = nrow(p_clean), 
+                        # `First author articles = ` = 6, 
+                        `Articles without PhD supervisor = ` = p_clean[!grepl("Workman", p_clean$author)] %>% nrow,
+                        # `Articles accepted for future publication = ` = 0,
+                        `Average citation per article = ` = round(mean(p_clean$cites))
+                        )
+text2plot <- melt(text2plot)
+
+## Write information to Excel
+openxlsx::write.xlsx(text2plot, file = "my_google_schoar_stats.xlsx", asTable = TRUE)
+
+```
+
+# Plots 
+
+## Citations
+
+```{r plot_citation}
+## Add coordinates for ggplot
+text2plot[, x := 2020]
+text2plot[, y := seq(400, 200, length.out = nrow(text2plot))]
+
+## Plot citation trend
+cite_plot <- ggplot(ct, aes(year, cumsum(cites))) + 
+  geom_line() + 
+  geom_point() + 
+  theme_bw(base_size = 12) + 
+  scale_x_continuous(breaks = scales::breaks_pretty()) + 
+  scale_y_continuous(breaks = scales::breaks_pretty()) + 
+  labs(title = paste0("Cumulative citations of ", 
+                      l$name), 
+       subtitle = paste0("Data retrieved from Google Scholar on ", 
+                         format(Sys.time(), "%e %B %Y, %A"))) + 
+  xlab("Year") + 
+  ylab("Citations") + 
+  annotate("text", 
+           x = text2plot$x, 
+           y = text2plot$y, 
+           label = paste(text2plot$variable,text2plot$value), 
+           hjust  = 1)
+
+cite_plot
+```
+
+# Session Info
+
+```{r session_info}
+sessionInfo()
+```
+
