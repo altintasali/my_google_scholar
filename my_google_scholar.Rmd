@@ -108,6 +108,11 @@ cite_plot <- ggplot(ct, aes(year, cumsum(cites))) +
            label = paste(text2plot$variable,text2plot$value), 
            hjust  = 1)
 
+ggsave(filename = "my_google_scholar_citation.png", 
+       plot = cite_plot, 
+       width = 8, 
+       height = 5)
+
 cite_plot
 ```
 
