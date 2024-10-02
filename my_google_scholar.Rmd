@@ -20,7 +20,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r libraries, message=FALSE}
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load("rmdformats")
-pacman::p_load("data.table", "magrittr", "ggplot2", "scholar", "openxlsx")
+pacman::p_load("scholar", "rentrez")
+pacman::p_load("data.table", "magrittr", "ggplot2", "openxlsx", "stringr", "RColorBrewer")
+pacman::p_load("wordcloud", "tm")
 
 ```
 
@@ -80,14 +82,71 @@ openxlsx::write.xlsx(text2plot, file = "my_google_schoar_stats.xlsx", asTable = 
 
 ```
 
+## Abstracts
+
+```{r extract_abstracts, warning=FALSE}
+get_abstract <- function(paper_title, sleep = 1){
+  Sys.sleep(sleep)
+  #if(verbose){print(paste0("Article title provided: ", paper_title))}
+  
+  search_results <- tryCatch({
+    rentrez::entrez_search(db = "pubmed", term = paper_title, retmax = 1)
+  }, error = function(e) {
+    message("An error occurred: ", e$message)
+    return(NULL)
+  })
+  
+  pmid <- search_results$ids[1][[1]]
+  if(!is.null(pmid)){
+    article_details <- rentrez::entrez_fetch(db = "pubmed", 
+                                             id = pmid, 
+                                             rettype = "abstract", 
+                                             retmode = "text")  
+    abstract <- stringr::str_split_fixed(string = article_details, 
+                                         pattern = ".\n\n", 
+                                         n = Inf) %>% trimws %>% as.vector
+    auth_ind <- grep("^Author information:", abstract)
+    comm_ind <- grep("^Comment in\n", abstract)
+    copy_ind <- grep("^\u00A9|^Copyright \u00A9" , abstract) #(c) sign = \u00A9
+    doi_ind <- grep("^DOI:", abstract)
+
+    if(length(copy_ind)){
+      ind <- doi_ind - 2
+    }else{
+      ind <- doi_ind - 1
+    }
+    
+    abstract <- abstract[ind] %>% 
+      stringr::str_replace_all(., "\n", " ") %>%
+      stringr::str_replace_all(., "  ", " ")
+    
+    #if(verbose){print(abstract)}
+    return(abstract)
+  }else{
+    message("No paper found for the given title.")
+    return(NA)
+  }
+
+}
+
+abstracts <- sapply(p_clean$title, get_abstract)
+p_clean$abstract <- abstracts
+
+write.xlsx(x = p_clean, file = "publication_details.xlsx", asTable = TRUE)
+#fwrite(x = p_clean, file = "publication_details.tsv.gz", sep = "\t")
+```
+
 # Plots 
 
 ## Citations
 
 ```{r plot_citation}
 ## Add coordinates for ggplot
-text2plot[, x := 2020]
-text2plot[, y := seq(400, 200, length.out = nrow(text2plot))]
+x_axis <- quantile(ct$year, 0.40)
+y_axis1 <- quantile(cumsum(ct$cites), 0.90)
+y_axis2 <- quantile(cumsum(ct$cites), 0.75)
+text2plot[, x := x_axis]
+text2plot[, y := seq(y_axis1, y_axis2, length.out = nrow(text2plot))]
 
 ## Plot citation trend
 cite_plot <- ggplot(ct, aes(year, cumsum(cites))) + 
@@ -98,11 +157,11 @@ cite_plot <- ggplot(ct, aes(year, cumsum(cites))) +
   scale_y_continuous(breaks = scales::breaks_pretty()) + 
   labs(title = paste0("Cumulative citations of ", 
                       l$name), 
-       subtitle = paste0("Data retrieved from Google Scholar on ", 
+       subtitle = paste0("Data retrieved from Google Scholar on", 
                          format(Sys.time(), "%e %B %Y, %A"))) + 
   xlab("Year") + 
   ylab("Citations") + 
-  annotate("text", 
+  ggplot2::annotate("text", 
            x = text2plot$x, 
            y = text2plot$y, 
            label = paste(text2plot$variable,text2plot$value), 
@@ -114,6 +173,32 @@ ggsave(filename = "my_google_scholar_citation.png",
        height = 5)
 
 cite_plot
+```
+
+## Abstracts
+
+```{r plot_abstract-wordcloud}
+docs <- Corpus(VectorSource(c(p_clean$title, p_clean$abstract)))
+docs <- tm_map(docs, content_transformer(tolower))  
+docs <- tm_map(docs, removePunctuation)  
+#docs <- tm_map(docs, removeNumbers) 
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs)
+matrix <- as.matrix(dtm)
+word_freqs <- sort(rowSums(matrix), decreasing=TRUE)
+dt <- data.frame(word=names(word_freqs), freq=word_freqs)
+
+palette <- brewer.pal(8, "Dark2")
+set.seed(666)
+wordcloud(words = dt$word, 
+          freq = dt$freq, 
+          scale = c(2.5, .5),
+          min.freq = 10, 
+          max.words = 100,
+          random.order = FALSE, 
+          colors=palette, 
+          random.color = TRUE)
 ```
 
 # Session Info
